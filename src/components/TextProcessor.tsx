@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Copy, Check, RotateCcw, ArrowDown, Info } from 'lucide-react';
+import { Copy, Check, RotateCcw, ArrowDown, Info, Maximize2, Minimize2 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import TextActions from './TextActions';
 import TextStats from './TextStats';
@@ -215,6 +215,18 @@ const getColorName = (rgb: string): string => {
   return hex;
 };
 
+// Add a sanitizer to allow only inline formatting and spacing tags, but strip bold
+function sanitizeHtml(html: string) {
+  // Remove all <b> and <strong> tags (bold)
+  let sanitized = html.replace(/<\/?(b|strong)\b[^>]*>/gi, '');
+  // Allow only i, em, u, br, p, div, span (no style attributes)
+  sanitized = sanitized
+    .replace(/<(?!\/?(i|em|u|br|p|div|span)\b)[^>]*>/gi, '') // remove all other tags
+    .replace(/<((i|em|u|br|p|div|span)[^>]*) style="[^"]*"/gi, '<$1') // remove style attributes
+    .replace(/<((i|em|u|br|p|div|span)[^>]*) (class|id|color|bgcolor|face|size|align|width|height|data-[^=]*)="[^"]*"/gi, '<$1');
+  return sanitized;
+}
+
 const TextProcessor: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [outputText, setOutputText] = useState('');
@@ -229,6 +241,8 @@ const TextProcessor: React.FC = () => {
   // Track last programmatic update to outputText
   const [lastOutputText, setLastOutputText] = useState('');
 
+  const [isOutputExpanded, setIsOutputExpanded] = useState(false);
+
   const handlePaste = async (e: React.ClipboardEvent) => {
     e.preventDefault();
     setIsProcessing(true);
@@ -238,11 +252,14 @@ const TextProcessor: React.FC = () => {
     // Get HTML content from clipboard
     const htmlContent = e.clipboardData.getData('text/html');
     const plainText = e.clipboardData.getData('text/plain');
+    let cleanedHtml = htmlContent;
     
     if (htmlContent) {
+      // Aggressively remove all leading <br>, <div>, <p>, and whitespace
+      cleanedHtml = htmlContent.replace(/^((<br\s*\/?>|<div>\s*<\/div>|<div><br\s*\/?><\/div>|<p>\s*<\/p>|<p><br\s*\/?><\/p>|\s|\n|\r)+)/i, '');
       // Create a temporary div to parse the HTML
       const tempDiv = document.createElement('div');
-      tempDiv.innerHTML = htmlContent;
+      tempDiv.innerHTML = cleanedHtml;
       tempDiv.style.visibility = 'hidden';
       document.body.appendChild(tempDiv);
       
@@ -310,15 +327,25 @@ const TextProcessor: React.FC = () => {
     
     // Update the input with original HTML content
     if (inputRef.current) {
-      inputRef.current.innerHTML = htmlContent || plainText;
-      const range = document.createRange();
-      range.selectNodeContents(inputRef.current);
-      range.collapse(false);
+      // Insert at caret position instead of replacing all content
       const selection = window.getSelection();
-      if (selection) {
-        selection.removeAllRanges();
-        selection.addRange(range);
+      if (selection && selection.rangeCount > 0) {
+        selection.deleteFromDocument();
+        // Use execCommand for compatibility
+        document.execCommand('insertHTML', false, cleanedHtml || plainText);
+      } else {
+        // Fallback: append to end
+        inputRef.current.innerHTML += cleanedHtml || plainText;
       }
+      // After paste, defer state update to after DOM update
+      setTimeout(() => {
+        if (inputRef.current) {
+          const newHtml = inputRef.current.innerHTML;
+          const newText = inputRef.current.textContent || '';
+          setInputText(newText);
+          setOutputText(sanitizeHtml(newHtml));
+        }
+      }, 0);
     } else {
       setInputText(plainText);
     }
@@ -398,9 +425,9 @@ const TextProcessor: React.FC = () => {
 
   const clearText = () => {
     setInputText('');
-    setOutputText('');
-    setStrippedStyles([]);
-    resetInputFormat();
+    if (inputRef.current) {
+      inputRef.current.innerHTML = '';
+    }
   };
 
   const modifyText = (type: 'lowercase' | 'uppercase' | 'titlecase') => {
@@ -427,14 +454,16 @@ const TextProcessor: React.FC = () => {
     setOutputText(newText);
   };
 
-  // Handle when user starts typing after a clear
+  // When input changes, copy its HTML to output (sanitized)
   const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
-    const content = e.currentTarget.textContent || '';
-    // If this is the first character being typed after being empty
-    if (content.length === 1 && !inputText) {
+    const content = e.currentTarget.innerHTML;
+    const textContent = e.currentTarget.textContent || '';
+    if (textContent.length === 1 && !inputText) {
       resetInputFormat();
+      setStrippedStyles([]);
     }
-    handleTextChange({ target: { value: content } } as React.ChangeEvent<HTMLTextAreaElement>);
+    setInputText(textContent);
+    setOutputText(sanitizeHtml(content));
   };
 
   // Re-apply input box formatting when theme changes
@@ -464,8 +493,8 @@ const TextProcessor: React.FC = () => {
     // Do nothing here to avoid caret jump
   };
   const handleOutputBlur = (e: React.FocusEvent<HTMLDivElement>) => {
-    setOutputText(e.currentTarget.innerHTML.replace(/<br>/g, '\n').replace(/<div>/g, '\n').replace(/<\/div>/g, ''));
-    setLastOutputText(e.currentTarget.innerHTML);
+    setOutputText(sanitizeHtml(e.currentTarget.innerHTML));
+    setLastOutputText(sanitizeHtml(e.currentTarget.innerHTML));
   };
 
   return (
@@ -475,48 +504,50 @@ const TextProcessor: React.FC = () => {
         <p className="font-mono opacity-80">Paste your formatted text below to strip all formatting</p>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
-        <div className="flex flex-col h-full">
-          <div className="flex items-center min-h-[48px] mb-2">
-            <label htmlFor="input-text" className="block font-mono text-sm font-medium">
-              Input Text
-            </label>
+      <div className={`grid gap-6 items-stretch ${isOutputExpanded ? '' : 'grid-cols-1 md:grid-cols-2'}`}>
+        {!isOutputExpanded && (
+          <div className="flex flex-col h-full">
+            <div className="flex items-center min-h-[48px] mb-2">
+              <label htmlFor="input-text" className="block font-mono text-sm font-medium">
+                Input Text
+              </label>
+            </div>
+            <div className={`relative rounded-md overflow-hidden border ${
+              theme === 'dark' ? 'border-gray-700' : 'border-amber-300'
+            }`}>
+              <div
+                ref={inputRef}
+                contentEditable
+                className={`w-full min-h-64 h-64 max-h-64 p-3 text-sm resize-none focus:outline-none overflow-auto box-border ${
+                  theme === 'dark' 
+                    ? 'bg-gray-800 placeholder-gray-500' 
+                    : 'bg-white placeholder-amber-300'
+                }`}
+                onPaste={handlePaste}
+                onKeyDown={handleKeyDown}
+                onInput={handleInput}
+                role="textbox"
+                aria-label="Input text"
+                style={{ fontFamily: 'inherit' }}
+              />
+            </div>
+            <div className="flex justify-between mt-2">
+              <button
+                onClick={clearText}
+                className={`px-3 py-1 font-mono text-sm rounded flex items-center gap-1 ${
+                  theme === 'dark'
+                    ? 'bg-gray-800 hover:bg-gray-700'
+                    : 'bg-amber-200 hover:bg-amber-300'
+                }`}
+              >
+                <RotateCcw size={14} /> Clear
+              </button>
+              <TextStats text={inputText} />
+            </div>
           </div>
-          <div className={`relative rounded-md overflow-hidden border ${
-            theme === 'dark' ? 'border-gray-700' : 'border-amber-300'
-          }`}>
-            <div
-              ref={inputRef}
-              contentEditable
-              className={`w-full min-h-64 h-64 p-3 text-sm resize-none focus:outline-none overflow-auto box-border ${
-                theme === 'dark' 
-                  ? 'bg-gray-800 placeholder-gray-500' 
-                  : 'bg-white placeholder-amber-300'
-              }`}
-              onPaste={handlePaste}
-              onKeyDown={handleKeyDown}
-              onInput={handleInput}
-              role="textbox"
-              aria-label="Input text"
-              style={{ fontFamily: 'inherit' }}
-            />
-          </div>
-          <div className="flex justify-between mt-2">
-            <button
-              onClick={clearText}
-              className={`px-3 py-1 font-mono text-sm rounded flex items-center gap-1 ${
-                theme === 'dark'
-                  ? 'bg-gray-800 hover:bg-gray-700'
-                  : 'bg-amber-200 hover:bg-amber-300'
-              }`}
-            >
-              <RotateCcw size={14} /> Clear
-            </button>
-            <TextStats text={inputText} />
-          </div>
-        </div>
+        )}
         
-        <div className="flex flex-col h-full">
+        <div className={`flex flex-col h-full ${isOutputExpanded ? 'col-span-2' : ''}`}>
           <div className="flex items-center min-h-[48px] mb-2 justify-between w-full">
             <label htmlFor="output-text" className="block font-mono text-sm font-medium">
               Output Text
@@ -525,6 +556,14 @@ const TextProcessor: React.FC = () => {
               <button type="button" className={`px-2 py-1 font-mono text-xs rounded border ${theme === 'dark' ? 'bg-gray-800 border-gray-700 hover:bg-gray-700' : 'bg-amber-100 border-amber-300 hover:bg-amber-200'}`} onClick={() => formatOutput('bold')} title="Bold"><b>B</b></button>
               <button type="button" className={`px-2 py-1 font-mono text-xs rounded border ${theme === 'dark' ? 'bg-gray-800 border-gray-700 hover:bg-gray-700' : 'bg-amber-100 border-amber-300 hover:bg-amber-200'}`} onClick={() => formatOutput('italic')} title="Italic"><i>I</i></button>
               <button type="button" className={`px-2 py-1 font-mono text-xs rounded border ${theme === 'dark' ? 'bg-gray-800 border-gray-700 hover:bg-gray-700' : 'bg-amber-100 border-amber-300 hover:bg-amber-200'}`} onClick={() => formatOutput('underline')} title="Underline"><u>U</u></button>
+              <button
+                onClick={() => setIsOutputExpanded(expanded => !expanded)}
+                className={`p-2 rounded border flex items-center justify-center ${theme === 'dark' ? 'bg-gray-800 border-gray-700 hover:bg-gray-700' : 'bg-amber-100 border-amber-300 hover:bg-amber-200'}`}
+                title={isOutputExpanded ? 'Collapse Output' : 'Expand Output'}
+                aria-label={isOutputExpanded ? 'Collapse Output' : 'Expand Output'}
+              >
+                {isOutputExpanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+              </button>
             </div>
           </div>
           <div className={`relative rounded-md overflow-hidden border ${
@@ -543,7 +582,8 @@ const TextProcessor: React.FC = () => {
               placeholder="Stripped text will appear here..."
               onInput={handleOutputInput}
               onBlur={handleOutputBlur}
-              style={{ fontFamily: 'inherit' }}
+              style={{ fontFamily: 'inherit', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+              dangerouslySetInnerHTML={{ __html: outputText }}
             />
           </div>
           <div className="flex justify-between mt-2">
@@ -559,6 +599,26 @@ const TextProcessor: React.FC = () => {
             </button>
             <TextStats text={outputText} />
           </div>
+          {strippedStyles.length > 0 && inputText.trim() && outputText.trim() && (
+            <div className={`mt-4 p-3 rounded-md font-mono text-xs ${
+              theme === 'dark' 
+                ? 'bg-gray-800 border border-gray-700' 
+                : 'bg-amber-50 border border-amber-200'
+            }`}>
+              <div className="flex items-center gap-1 mb-2 font-medium">
+                <Info size={12} />
+                <span>Changes Made:</span>
+              </div>
+              <ul className="space-y-1 opacity-80">
+                {strippedStyles.map((style, i) => (
+                  <li key={i} className="flex items-center">
+                    <span className="mr-2">•</span>
+                    <span>{style}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       </div>
     </div>
