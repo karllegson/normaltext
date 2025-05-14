@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Copy, Check, RotateCcw, ArrowDown, Info, Maximize2, Minimize2 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
-import TextActions from './TextActions';
 import TextStats from './TextStats';
 
 interface StyleChange {
@@ -416,7 +415,7 @@ const TextProcessor: React.FC = () => {
   };
 
   const copyToClipboard = () => {
-    if (outputText && outputRef.current) {
+    if (outputText) {
       navigator.clipboard.writeText(outputText);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -593,9 +592,11 @@ const TextProcessor: React.FC = () => {
                 theme === 'dark'
                   ? 'bg-gray-800 hover:bg-gray-700'
                   : 'bg-amber-200 hover:bg-amber-300'
-              }`}
+              } ${copied ? (theme === 'dark' ? 'text-green-400' : 'text-green-700') : ''}`}
+              disabled={!outputText || copied}
             >
-              <Copy size={14} /> Copy
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+              {copied ? 'Copied!' : 'Copy'}
             </button>
             <TextStats text={outputText} />
           </div>
