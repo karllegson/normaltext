@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-mono: 'Courier New', Courier, monospace;
+}
+
+body {
+  font-family: var(--font-mono);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.scanlines {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0) 50%,
+    rgba(0, 0, 0, 0.02) 50%
+  );
+  background-size: 100% 4px;
+  z-index: 50;
+  pointer-events: none;
+  opacity: 0.3;
+}
+
+.light .scanlines {
+  opacity: 0.1;
+}
+
+/* Add retro cursor animation to textareas */
+textarea {
+  caret-color: currentColor;
+  caret-shape: block;
+}
+
+/* Add focus glow effect on dark mode */
+.dark textarea:focus {
+  box-shadow: 0 0 10px 1px rgba(74, 222, 128, 0.2);
+}
+
+/* Custom scrollbar for retro feel */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: #1f2937;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #4b5563;
+}
+
+.light ::-webkit-scrollbar-track {
+  background: #fef3c7;
+}
+
+.light ::-webkit-scrollbar-thumb {
+  background: #fcd34d;
+}
+
+/* Add subtle typing animation */
+@keyframes typing {
+  from { width: 0 }
+  to { width: 100% }
+}
+
+/* Add CRT power on/off effect for theme toggle */
+.transition-colors {
+  transition: color 0.3s ease, background-color 0.3s ease;
+}
